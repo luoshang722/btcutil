@@ -1,7 +1,6 @@
 package coinset
 
 import (
-	"container/list"
 	"errors"
 	"sort"
 
@@ -9,149 +8,134 @@ import (
 	"github.com/conformal/btcwire"
 )
 
+var (
+	// ErrCoinsNoSelectionAvailable is returned when a CoinSelector
+	// was unable to find any combination of coins which meet the
+	// selection requirements.
+	ErrCoinsNoSelectionAvailable = errors.New("no coin selection possible")
+)
+
 // Coin represents a spendable transaction outpoint
 type Coin interface {
-	Hash() *btcwire.ShaHash
-	Index() uint32
-	Value() btcutil.Amount
-	PkScript() []byte
-	NumConfs() int64
+	Amount() btcutil.Amount
 	ValueAge() int64
 }
 
 // Coins represents a set of Coins
 type Coins interface {
-	Coins() []Coin
+	Coin(int) Coin
+	AmountCoin(int) AmountCoin
+	ValueAgeCoin(int) ValueAgeCoin
+	Len() int
+	Swap(int, int)
 }
 
-// CoinSet is a utility struct for the modifications of a set of
-// Coins that implements the Coins interface.  To create a CoinSet,
-// you must call NewCoinSet with nil for an empty set or a slice of
-// coins as the initial contents.
-//
+// AmountCoins represents an ordered, indexed, and reorderable set of
+// transaction outputs with known amounts.
+type AmountCoins interface {
+	AmountCoin(int) AmountCoin
+	Len() int
+	Swap(int, int)
+}
+
+// AmountCoin represents a transaction output with a known amount.
+type AmountCoin interface {
+	Amount() btcutil.Amount
+}
+
+type ValueAgeCoin interface {
+	Amount() btcutil.Amount
+	ValueAge() int64
+}
+
+type ValueAgeCoins interface {
+	ValueAgeCoin(i int) ValueAgeCoin
+	Len() int
+	Swap(int, int)
+}
+
+type indexedCoin struct {
+	coin  Coin
+	index int
+}
+
 // It is important to note that the all the Coins being added or removed
-// from a CoinSet must have a constant ValueAge() during the use of
+// from a set must have a constant ValueAge() during the use of
 // the CoinSet, otherwise the cached values will be incorrect.
-type CoinSet struct {
-	coinList      *list.List
+type subset struct {
+	set ValueAgeCoins
+	idxs []int
 	totalValue    btcutil.Amount
 	totalValueAge int64
 }
 
-// Ensure that CoinSet is a Coins
-var _ Coins = NewCoinSet(nil)
-
-// NewCoinSet creates a CoinSet containing the coins provided.
-// To create an empty CoinSet, you may pass null as the coins input parameter.
-func NewCoinSet(coins []Coin) *CoinSet {
-	newCoinSet := &CoinSet{
-		coinList:      list.New(),
-		totalValue:    0,
-		totalValueAge: 0,
+// newSubset creates a subset of a coin set, pushing each coin of the coins from
+// the initial coin set.
+func newSubset(coins Coins, idxs []int) *subset {
+	s := &subset{
+		set: coins,
+		idxs: idxs,
 	}
-	for _, coin := range coins {
-		newCoinSet.PushCoin(coin)
+	for _, i := range idxs {
+		coin := coins.Coin(i)
+		s.totalValue += coin.Amount()
+		s.totalValueAge += coin.ValueAge()
 	}
-	return newCoinSet
+	return s
 }
 
-// Coins returns a new slice of the coins contained in the set.
-func (cs *CoinSet) Coins() []Coin {
-	coins := make([]Coin, cs.coinList.Len())
-	for i, e := 0, cs.coinList.Front(); e != nil; i, e = i+1, e.Next() {
-		coins[i] = e.Value.(Coin)
-	}
-	return coins
+// pushBack adds a coin at some index from another coinset to the end of the
+// ordered set.
+func (s *subset) pushBack(i int) {
+	s.idxs = append(s.idxs, i)
+	c := s.set.ValueAgeCoin(i)
+	s.totalValue += c.Amount()
+	s.totalValueAge += c.ValueAge()
 }
 
-// TotalValue returns the total value of the coins in the set.
-func (cs *CoinSet) TotalValue() (value btcutil.Amount) {
-	return cs.totalValue
+// popBack returns and removes the last coin from the ordered set.
+// TODO: how to handle empty set?
+func (s *subset) popBack() ValueAgeCoin {
+	i := s.idxs[len(s.idxs) - 1]
+	back := s.set.ValueAgeCoin(i)
+	s.idxs = s.idxs[:len(s.idxs)-1]
+	s.subTotals(back)
+	return back
 }
 
-// TotalValueAge returns the total value * number of confirmations
-//  of the coins in the set.
-func (cs *CoinSet) TotalValueAge() (valueAge int64) {
-	return cs.totalValueAge
+// popFront returns and removes the first coin from the ordered set.
+// TODO: how to handle empty set?
+func (s *subset) popFront() ValueAgeCoin {
+	i := s.idxs[0]
+	s.idxs = s.idxs[1:]
+	front := s.set.ValueAgeCoin(i)
+	s.subTotals(front)
+	return front
 }
 
-// Num returns the number of coins in the set
-func (cs *CoinSet) Num() int {
-	return cs.coinList.Len()
+// subTotals subtracts the value amount for a removed coin from the
+// cached amounts in the set.
+func (s *subset) subTotals(c Coin) {
+	s.totalValue -= c.Amount()
+	s.totalValueAge -= c.ValueAge()
 }
 
-// PushCoin adds a coin to the end of the list and updates
-// the cached value amounts.
-func (cs *CoinSet) PushCoin(c Coin) {
-	cs.coinList.PushBack(c)
-	cs.totalValue += c.Value()
-	cs.totalValueAge += c.ValueAge()
+// indexes returns the indexes of all coins from the coinset that were added
+// to the utility set.
+func (s *subset) indexes() []int {
+	return s.idxs
 }
 
-// PopCoin removes the last coin on the list and returns it.
-func (cs *CoinSet) PopCoin() Coin {
-	back := cs.coinList.Back()
-	if back == nil {
-		return nil
-	}
-	return cs.removeElement(back)
+// satisfiesTargetAmount returns whether the total amount is either exactly the
+// target or is greater than the target by at least the minChange amount.
+func satisfiesTargetAmount(target, minChange, total btcutil.Amount) bool {
+	return total == target || total >= target+minChange
 }
 
-// ShiftCoin removes the first coin on the list and returns it.
-func (cs *CoinSet) ShiftCoin() Coin {
-	front := cs.coinList.Front()
-	if front == nil {
-		return nil
-	}
-	return cs.removeElement(front)
-}
-
-// removeElement updates the cached value amounts in the CoinSet,
-// removes the element from the list, then returns the Coin that
-// was removed to the caller.
-func (cs *CoinSet) removeElement(e *list.Element) Coin {
-	c := e.Value.(Coin)
-	cs.coinList.Remove(e)
-	cs.totalValue -= c.Value()
-	cs.totalValueAge -= c.ValueAge()
-	return c
-}
-
-// NewMsgTxWithInputCoins takes the coins in the CoinSet and makes them
-// the inputs to a new btcwire.MsgTx which is returned.
-func NewMsgTxWithInputCoins(inputCoins Coins) *btcwire.MsgTx {
-	msgTx := btcwire.NewMsgTx()
-	coins := inputCoins.Coins()
-	msgTx.TxIn = make([]*btcwire.TxIn, len(coins))
-	for i, coin := range coins {
-		msgTx.TxIn[i] = &btcwire.TxIn{
-			PreviousOutpoint: btcwire.OutPoint{
-				Hash:  *coin.Hash(),
-				Index: coin.Index(),
-			},
-			SignatureScript: nil,
-			Sequence:        btcwire.MaxTxInSequenceNum,
-		}
-	}
-	return msgTx
-}
-
-var (
-	// ErrCoinsNoSelectionAvailable is returned when a CoinSelector believes there is no
-	// possible combination of coins which can meet the requirements provided to the selector.
-	ErrCoinsNoSelectionAvailable = errors.New("no coin selection possible")
-)
-
-// satisfiesTargetValue checks that the totalValue is either exactly the targetValue
-// or is greater than the targetValue by at least the minChange amount.
-func satisfiesTargetValue(targetValue, minChange, totalValue btcutil.Amount) bool {
-	return (totalValue == targetValue || totalValue >= targetValue+minChange)
-}
-
-// CoinSelector is an interface that wraps the CoinSelect method.
+// Selector is an interface that wraps the CoinSelect method.
 //
-// CoinSelect will attempt to select a subset of the coins which has at
-// least the targetValue amount.  CoinSelect is not guaranteed to return a
+// Select will attempt to select a subset of the coins which has at least the
+// targetValue amount.  CoinSelect is not guaranteed to return a
 // selection of coins even if the total value of coins given is greater
 // than the target value.
 //
@@ -159,26 +143,35 @@ func satisfiesTargetValue(targetValue, minChange, totalValue btcutil.Amount) boo
 //
 // It is important to note that the Coins being used as inputs need to have
 // a constant ValueAge() during the execution of CoinSelect.
-type CoinSelector interface {
+type Selector interface {
 	CoinSelect(targetValue btcutil.Amount, coins []Coin) (Coins, error)
 }
 
-// MinIndexCoinSelector is a CoinSelector that attempts to construct a
-// selection of coins whose total value is at least targetValue and prefers
-// any number of lower indexes (as in the ordered array) over higher ones.
-type MinIndexCoinSelector struct {
+// Args describes the common arguments used by all selection algorithms when
+// selecting previous outputs to use in a new transaction.
+type Args struct {
 	MaxInputs       int
 	MinChangeAmount btcutil.Amount
 }
 
-// CoinSelect will attempt to select coins using the algorithm described
-// in the MinIndexCoinSelector struct.
-func (s MinIndexCoinSelector) CoinSelect(targetValue btcutil.Amount, coins []Coin) (Coins, error) {
-	cs := NewCoinSet(nil)
-	for n := 0; n < len(coins) && n < s.MaxInputs; n++ {
-		cs.PushCoin(coins[n])
-		if satisfiesTargetValue(targetValue, s.MinChangeAmount, cs.TotalValue()) {
-			return cs, nil
+// SelectMinIndex will attempt to construct a coin selection whose total value
+// is at least target and prefers any number of lower indexes (as in the
+// ordered array or slice) over higher ones.
+func (a Args) SelectMinIndex(target btcutil.Amount, coins AmountCoins) ([]int, error) {
+	sel := make([]AmountCoin, 0, a.MaxInputs)
+	var total btcutil.Amount
+
+	numCoins := coins.Len()
+	for i := 0; i < numCoins && i < a.MaxInputs; i++ {
+		coin := coins.AmountCoin(i)
+		sel = append(sel, coin)
+		total += coin.Amount()
+		if satisfiesTargetAmount(target, a.MinChangeAmount, total) {
+			idxs := make([]int, len(sel))
+			for i := range sel {
+				idxs[i] = i
+			}
+			return idxs, nil
 		}
 	}
 	return nil, ErrCoinsNoSelectionAvailable
@@ -192,70 +185,38 @@ type MinNumberCoinSelector struct {
 	MinChangeAmount btcutil.Amount
 }
 
-// CoinSelect will attempt to select coins using the algorithm described
-// in the MinNumberCoinSelector struct.
-func (s MinNumberCoinSelector) CoinSelect(targetValue btcutil.Amount, coins []Coin) (Coins, error) {
-	sortedCoins := make([]Coin, 0, len(coins))
-	sortedCoins = append(sortedCoins, coins...)
-	sort.Sort(sort.Reverse(byAmount(sortedCoins)))
-	return (&MinIndexCoinSelector{
-		MaxInputs:       s.MaxInputs,
-		MinChangeAmount: s.MinChangeAmount,
-	}).CoinSelect(targetValue, sortedCoins)
+// MinNumberSelect will attempt to construct a coin selection whose total
+// value is at least targetValue using at few inputs as possible.
+func (a Args) MinNumberSelect(target btcutil.Amount, coins AmountCoins) ([]int, error) {
+	sort.Sort(sort.Reverse(byAmount{coins}))
+	return a.SelectMinIndex(target, coins)
 }
 
-// MaxValueAgeCoinSelector is a CoinSelector that attempts to construct
-// a selection of coins whose total value is at least targetValue
-// that has as much input value-age as possible.
+// MaxValueAgeSelect will attempt to construct a coin selection whose total
+// value is at least target and has as much input value-age as possible.
 //
-// This would be useful in the case where you want to maximize
-// likelihood of the inclusion of your transaction in the next mined
-// block.
-type MaxValueAgeCoinSelector struct {
-	MaxInputs       int
-	MinChangeAmount btcutil.Amount
+// This would be useful in the case where you want to maximize likelihood
+// of the inclusion of your transaction in the next mined block.
+func (a Args) MaxValueAgeSelect(target btcutil.Amount, coins Coins) ([]int, error) {
+	sort.Sort(sort.Reverse(byValueAge{coins}))
+	return a.SelectMinIndex(target, coins)
 }
 
-// CoinSelect will attempt to select coins using the algorithm described
-// in the MaxValueAgeCoinSelector struct.
-func (s MaxValueAgeCoinSelector) CoinSelect(targetValue btcutil.Amount, coins []Coin) (Coins, error) {
-	sortedCoins := make([]Coin, 0, len(coins))
-	sortedCoins = append(sortedCoins, coins...)
-	sort.Sort(sort.Reverse(byValueAge(sortedCoins)))
-	return (&MinIndexCoinSelector{
-		MaxInputs:       s.MaxInputs,
-		MinChangeAmount: s.MinChangeAmount,
-	}).CoinSelect(targetValue, sortedCoins)
-}
-
-// MinPriorityCoinSelector is a CoinSelector that attempts to construct
-// a selection of coins whose total value is at least targetValue and
-// whose average value-age per input is greater than MinAvgValueAgePerInput.
-// If there is change, it must exceed MinChangeAmount to be a valid selection.
+// MinPrioritySelect will attempt to construct a coin selection whose total
+// total amount is at least target and whose average value-age per input is
+// greater than minAvgValueAgePerInput.
 //
-// When possible, MinPriorityCoinSelector will attempt to reduce the average
-// input priority over the threshold, but no guarantees will be made as to
-// minimality of the selection.  The selection below is almost certainly
-// suboptimal.
-//
-type MinPriorityCoinSelector struct {
-	MaxInputs              int
-	MinChangeAmount        btcutil.Amount
-	MinAvgValueAgePerInput int64
-}
-
-// CoinSelect will attempt to select coins using the algorithm described
-// in the MinPriorityCoinSelector struct.
-func (s MinPriorityCoinSelector) CoinSelect(targetValue btcutil.Amount, coins []Coin) (Coins, error) {
-	possibleCoins := make([]Coin, 0, len(coins))
-	possibleCoins = append(possibleCoins, coins...)
-
-	sort.Sort(byValueAge(possibleCoins))
+// When possible, MinPrioritySelect will attempt to reduce the average input
+// priority over the threshold, but no guarantees will be made as to minimality
+// of the selection.  The selection below is almost certainly suboptimal.
+func (a Args) MinPrioritySelect(minAvgValueAgePerInput int64, target btcutil.Amount, coins ValueAgeCoins) ([]int, error) {
+	sort.Sort(byValueAge{coins})
 
 	// find the first coin with sufficient valueAge
 	cutoffIndex := -1
-	for i := 0; i < len(possibleCoins); i++ {
-		if possibleCoins[i].ValueAge() >= s.MinAvgValueAgePerInput {
+	numCoins := coins.Len()
+	for i := 0; i < numCoins; i++ {
+		if coins.ValueAgeCoin(i).ValueAge() >= minAvgValueAgePerInput {
 			cutoffIndex = i
 			break
 		}
@@ -265,33 +226,28 @@ func (s MinPriorityCoinSelector) CoinSelect(targetValue btcutil.Amount, coins []
 	}
 
 	// create sets of input coins that will obey minimum average valueAge
-	for i := cutoffIndex; i < len(possibleCoins); i++ {
-		possibleHighCoins := possibleCoins[cutoffIndex : i+1]
+	for i := cutoffIndex; i < numCoins; i++ {
+		possibleHighCoins := coins[cutoffIndex : i+1]
 
 		// choose a set of high-enough valueAge coins
-		highSelect, err := (&MinNumberCoinSelector{
-			MaxInputs:       s.MaxInputs,
-			MinChangeAmount: s.MinChangeAmount,
-		}).CoinSelect(targetValue, possibleHighCoins)
-
+		highSelect, err := a.MinNumberSelect(targetValue, possibleHighCoins)
 		if err != nil {
 			// attempt to add available low priority to make a solution
 
-			for numLow := 1; numLow <= cutoffIndex && numLow+(i-cutoffIndex) <= s.MaxInputs; numLow++ {
-				allHigh := NewCoinSet(possibleCoins[cutoffIndex : i+1])
+			for numLow := 1; numLow <= cutoffIndex && numLow+(i-cutoffIndex) <= a.MaxInputs; numLow++ {
+				allHigh := NewCoinSet(coins[cutoffIndex : i+1])
 				newTargetValue := targetValue - allHigh.TotalValue()
 				newMaxInputs := allHigh.Num() + numLow
 				if newMaxInputs > numLow {
 					newMaxInputs = numLow
 				}
-				newMinAvgValueAge := ((s.MinAvgValueAgePerInput * int64(allHigh.Num()+numLow)) - allHigh.TotalValueAge()) / int64(numLow)
+				newMinAvgValueAge := ((minAvgValueAgePerInput * int64(allHigh.Num()+numLow)) - allHigh.TotalValueAge()) / int64(numLow)
 
 				// find the minimum priority that can be added to set
-				lowSelect, err := (&MinPriorityCoinSelector{
-					MaxInputs:              newMaxInputs,
-					MinChangeAmount:        s.MinChangeAmount,
-					MinAvgValueAgePerInput: newMinAvgValueAge,
-				}).CoinSelect(newTargetValue, possibleCoins[0:cutoffIndex])
+				lowSelect, err := Args{
+					MaxInputs:       newMaxInputs,
+					MinChangeAmount: a.MinChangeAmount,
+				}.MinPrioritySelect(newMinAvgValueAge, newTargetVAlue, coins[0:cutoffIndex])
 
 				if err != nil {
 					continue
@@ -312,11 +268,11 @@ func (s MinPriorityCoinSelector) CoinSelect(targetValue btcutil.Amount, coins []
 				if extendedCoins.Num() >= s.MaxInputs {
 					break
 				}
-				if possibleCoins[n].ValueAge() == 0 {
+				if coins[n].ValueAge() == 0 {
 					continue
 				}
 
-				extendedCoins.PushCoin(possibleCoins[n])
+				extendedCoins.PushCoin(coins[n])
 				if extendedCoins.TotalValueAge()/int64(extendedCoins.Num()) < s.MinAvgValueAgePerInput {
 					extendedCoins.PopCoin()
 					continue
@@ -329,67 +285,46 @@ func (s MinPriorityCoinSelector) CoinSelect(targetValue btcutil.Amount, coins []
 	return nil, ErrCoinsNoSelectionAvailable
 }
 
-type byValueAge []Coin
+type byValueAge struct {
+	ValueAgeCoins
+}
 
-func (a byValueAge) Len() int           { return len(a) }
-func (a byValueAge) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a byValueAge) Less(i, j int) bool { return a[i].ValueAge() < a[j].ValueAge() }
+func (b byValueAge) Less(i, j int) bool {
+	return b.ValueAgeCoins.ValueAgeCoin(i).ValueAge() < b.ValueAgeCoins.ValueAgeCoin(j).ValueAge()
+}
 
-type byAmount []Coin
+type byAmount struct {
+	AmountCoins
+}
 
-func (a byAmount) Len() int           { return len(a) }
-func (a byAmount) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a byAmount) Less(i, j int) bool { return a[i].Value() < a[j].Value() }
+func (b byAmount) Less(i, j int) bool {
+	return b.AmountCoins.AmountCoin(i).Amount() < b.AmountCoins.AmountCoin(j).Amount()
+}
 
 // SimpleCoin defines a concrete instance of Coin that is backed by a
 // btcutil.Tx, a specific outpoint index, and the number of confirmations
 // that transaction has had.
 type SimpleCoin struct {
 	Tx         *btcutil.Tx
-	TxIndex    uint32
+	Output    uint32
 	TxNumConfs int64
 }
 
 // Ensure that SimpleCoin is a Coin
-var _ Coin = &SimpleCoin{}
-
-// Hash returns the hash value of the transaction on which the Coin is an output
-func (c *SimpleCoin) Hash() *btcwire.ShaHash {
-	return c.Tx.Sha()
-}
-
-// Index returns the index of the output on the transaction which the Coin represents
-func (c *SimpleCoin) Index() uint32 {
-	return c.TxIndex
-}
+var _ Coin = (*SimpleCoin)(nil)
 
 // txOut returns the TxOut of the transaction the Coin represents
 func (c *SimpleCoin) txOut() *btcwire.TxOut {
-	return c.Tx.MsgTx().TxOut[c.TxIndex]
+	return c.Tx.MsgTx().TxOut[c.Output]
 }
 
 // Value returns the value of the Coin
-func (c *SimpleCoin) Value() btcutil.Amount {
-	return btcutil.Amount(c.txOut().Value)
-}
-
-// PkScript returns the outpoint script of the Coin.
-//
-// This can be used to determine what type of script the Coin uses
-// and extract standard addresses if possible using
-// btcscript.ExtractPkScriptAddrs for example.
-func (c *SimpleCoin) PkScript() []byte {
-	return c.txOut().PkScript
-}
-
-// NumConfs returns the number of confirmations that the transaction the Coin references
-// has had.
-func (c *SimpleCoin) NumConfs() int64 {
-	return c.TxNumConfs
+func (c *SimpleCoin) Amount() btcutil.Amount {
+	return btcutil.Amount(c.txOut().Amount)
 }
 
 // ValueAge returns the product of the value and the number of confirmations.  This is
 // used as an input to calculate the priority of the transaction.
 func (c *SimpleCoin) ValueAge() int64 {
-	return c.TxNumConfs * int64(c.Value())
+	return c.TxNumConfs * int64(c.Amount())
 }
