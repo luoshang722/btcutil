@@ -119,40 +119,40 @@ func TestAmountUnitConversions(t *testing.T) {
 		s         string
 	}{
 		{
-			name:      "MBTC",
+			name:      "MLTC",
 			amount:    MaxSatoshi,
 			unit:      AmountMegaBTC,
 			converted: 21,
-			s:         "21 MBTC",
+			s:         "21 MLTC",
 		},
 		{
-			name:      "kBTC",
+			name:      "kLTC",
 			amount:    44433322211100,
 			unit:      AmountKiloBTC,
 			converted: 444.33322211100,
-			s:         "444.333222111 kBTC",
+			s:         "444.333222111 kLTC",
 		},
 		{
-			name:      "BTC",
+			name:      "LTC",
 			amount:    44433322211100,
 			unit:      AmountBTC,
 			converted: 444333.22211100,
-			s:         "444333.222111 BTC",
+			s:         "444333.222111 LTC",
 		},
 		{
-			name:      "mBTC",
+			name:      "LTC",
 			amount:    44433322211100,
 			unit:      AmountMilliBTC,
 			converted: 444333222.11100,
-			s:         "444333222.111 mBTC",
+			s:         "444333222.111 mLTC",
 		},
 		{
 
-			name:      "μBTC",
+			name:      "μLTC",
 			amount:    44433322211100,
 			unit:      AmountMicroBTC,
 			converted: 444333222111.00,
-			s:         "444333222111 μBTC",
+			s:         "444333222111 μLTC",
 		},
 		{
 
@@ -168,7 +168,7 @@ func TestAmountUnitConversions(t *testing.T) {
 			amount:    44433322211100,
 			unit:      AmountUnit(-1),
 			converted: 4443332.2211100,
-			s:         "4443332.22111 1e-1 BTC",
+			s:         "4443332.22111 1e-1 LTC",
 		},
 	}
 
@@ -209,52 +209,52 @@ func TestAmountMulF64(t *testing.T) {
 		res  Amount
 	}{
 		{
-			name: "Multiply 0.1 BTC by 2",
-			amt:  100e5, // 0.1 BTC
+			name: "Multiply 0.1 LTC by 2",
+			amt:  100e5, // 0.1 LTC
 			mul:  2,
-			res:  200e5, // 0.2 BTC
+			res:  200e5, // 0.2 LTC
 		},
 		{
-			name: "Multiply 0.2 BTC by 0.02",
-			amt:  200e5, // 0.2 BTC
+			name: "Multiply 0.2 LTC by 0.02",
+			amt:  200e5, // 0.2 LTC
 			mul:  1.02,
-			res:  204e5, // 0.204 BTC
+			res:  204e5, // 0.204 LTC
 		},
 		{
-			name: "Multiply 0.1 BTC by -2",
-			amt:  100e5, // 0.1 BTC
+			name: "Multiply 0.1 LTC by -2",
+			amt:  100e5, // 0.1 LTC
 			mul:  -2,
-			res:  -200e5, // -0.2 BTC
+			res:  -200e5, // -0.2 LTC
 		},
 		{
-			name: "Multiply 0.2 BTC by -0.02",
-			amt:  200e5, // 0.2 BTC
+			name: "Multiply 0.2 LTC by -0.02",
+			amt:  200e5, // 0.2 LTC
 			mul:  -1.02,
-			res:  -204e5, // -0.204 BTC
+			res:  -204e5, // -0.204 LTC
 		},
 		{
-			name: "Multiply -0.1 BTC by 2",
-			amt:  -100e5, // -0.1 BTC
+			name: "Multiply -0.1 LTC by 2",
+			amt:  -100e5, // -0.1 LTC
 			mul:  2,
-			res:  -200e5, // -0.2 BTC
+			res:  -200e5, // -0.2 LTC
 		},
 		{
-			name: "Multiply -0.2 BTC by 0.02",
-			amt:  -200e5, // -0.2 BTC
+			name: "Multiply -0.2 LTC by 0.02",
+			amt:  -200e5, // -0.2 LTC
 			mul:  1.02,
-			res:  -204e5, // -0.204 BTC
+			res:  -204e5, // -0.204 LTC
 		},
 		{
-			name: "Multiply -0.1 BTC by -2",
-			amt:  -100e5, // -0.1 BTC
+			name: "Multiply -0.1 LTC by -2",
+			amt:  -100e5, // -0.1 LTC
 			mul:  -2,
-			res:  200e5, // 0.2 BTC
+			res:  200e5, // 0.2 LTC
 		},
 		{
-			name: "Multiply -0.2 BTC by -0.02",
-			amt:  -200e5, // -0.2 BTC
+			name: "Multiply -0.2 LTC by -0.02",
+			amt:  -200e5, // -0.2 LTC
 			mul:  -1.02,
-			res:  204e5, // 0.204 BTC
+			res:  204e5, // 0.204 LTC
 		},
 		{
 			name: "Round down",
@@ -270,9 +270,9 @@ func TestAmountMulF64(t *testing.T) {
 		},
 		{
 			name: "Multiply by 0.",
-			amt:  1e8, // 1 BTC
+			amt:  1e8, // 1 LTC
 			mul:  0,
-			res:  0, // 0 BTC
+			res:  0, // 0 LTC
 		},
 		{
 			name: "Multiply 1 by 0.5.",
