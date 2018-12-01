@@ -7,7 +7,7 @@ package base58_test
 import (
 	"fmt"
 
-	"github.com/ltcsuite/ltcutil/base58"
+	"github.com/luoshang722/qtumutil/base58"
 )
 
 // This example demonstrates how to decode modified base58 encoded data.

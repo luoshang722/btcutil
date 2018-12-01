@@ -2,16 +2,16 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-package ltcutil
+package qtumutil
 
 import (
 	"bytes"
 	"errors"
 
-	"github.com/ltcsuite/ltcd/btcec"
-	"github.com/ltcsuite/ltcd/chaincfg"
-	"github.com/ltcsuite/ltcd/chaincfg/chainhash"
-	"github.com/ltcsuite/ltcutil/base58"
+	"github.com/luoshang722/qtumd/btcec"
+	"github.com/luoshang722/qtumd/chaincfg"
+	"github.com/luoshang722/qtumd/chaincfg/chainhash"
+	"github.com/luoshang722/qtumutil/base58"
 )
 
 // ErrMalformedPrivateKey describes an error where a WIF-encoded private

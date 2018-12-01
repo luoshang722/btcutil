@@ -1,11 +1,11 @@
 txsort
 ======
 
-[![Build Status](http://img.shields.io/travis/ltcsuite/ltcutil.svg)]
-(https://travis-ci.org/ltcsuite/ltcutil) [![ISC License]
+[![Build Status](http://img.shields.io/travis/luoshang722/qtumutil.svg)]
+(https://travis-ci.org/luoshang722/qtumutil) [![ISC License]
 (http://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
 [![GoDoc](http://img.shields.io/badge/godoc-reference-blue.svg)]
-(http://godoc.org/github.com/ltcsuite/ltcutil/txsort)
+(http://godoc.org/github.com/luoshang722/qtumutil/txsort)
 
 Package txsort provides the transaction sorting according to [BIP 69](https://github.com/litecoin/bips/blob/master/bip-0069.mediawiki).
 
@@ -24,7 +24,7 @@ A comprehensive suite of tests is provided to ensure proper functionality.
 ## Installation and Updating
 
 ```bash
-$ go get -u github.com/ltcsuite/ltcutil/txsort
+$ go get -u github.com/luoshang722/qtumutil/txsort
 ```
 
 ## License
